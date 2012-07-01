@@ -1,0 +1,107 @@
+#!/usr/bin/python
+
+#####################################################
+# Nicolas Biscos - 13 Jan 12                        #
+#                                                   #
+# Perform a dictionary-based DNS brute-force, using #
+# a public DNS server for more stealth              #
+#                                                   #
+#####################################################
+
+"""
+TODO List:
+   * Check whether output exists or not
+   * Extend to other domain than A record (NS, MX, AAAA, SOA)
+   * Use recursion on results
+"""
+
+from scapy.all import *;
+from getopt import getopt;
+import sys, os;
+
+r = RandShort()
+r.min = 1024;
+
+DEFAULT_FILENAME = 'host.txt';
+DEFAULT_DNS_SERVER = '8.8.8.8';
+DEFAULT_DNS_PORT = 53;
+DEFAULT_SRC_PORT = r
+
+"""
+Print usage and exits
+"""
+def doHelp():
+   print 'BruteDNS: brute force DNS domain'
+   print '   -f <filenqme>, --file=<filename>  : dictionary input (default to host.txt)'
+   print '   -d <dns>     , --dns=<dns>        : DNS name to make request on (defaulting to %s)' % (DEFAULT_DNS_SERVER);
+   print '   -p <port>    , --dport=<port>     : DNS port to make request on (defaulting to %i)' % (DEFAULT_DNS_PORT);
+   print '   --sport=<port>                    : make request from this port (defaulting to random)' 
+   print '   -o <filename>, --output=<filename>: set results in filename (default to screen)'
+   sys.exit(0);
+
+
+"""
+Perform DNS request and return Response Records as a List
+@param dnsServer DNS server address to perform request on. Might be in IP or FQDN format
+@param domain domain to look for A record
+@param dnsPort port on DNS server on which request shall be performed
+@param srcPort port emitting requests
+@return a list containing the RR details
+"""
+def dnsReq(domain, dnsServer='8.8.8.8', dnsPort=53, srcPort=3310):
+   qd = DNSQR();
+   qd.type = 1;
+   qd.qname=domain;
+   dns = IP(dst=dnsServer)/UDP(dport=dnsPort, sport=srcPort)/DNS(opcode=0, rd=1, qdcount=1, qd=qd);
+   ans = sr1(dns, verbose=0);
+   dnsrr = ans[DNS].an;
+   rslts = None;
+   if( dnsrr ):
+      #This is NOT nice but I did not find a way to iterate over DNSRR stack
+      rslts = [];
+      i = 0
+      while True:
+         try:
+            rslts.append(dnsrr[i].rdata);
+            i = i + 1;
+         except IndexError:
+            break;
+   return rslts;
+
+if( "__main__" == __name__ ):
+   fileName  = DEFAULT_FILENAME;
+   dnsServer = DEFAULT_DNS_SERVER;
+   dnsPort   = DEFAULT_DNS_PORT;
+   srcPort   = DEFAULT_SRC_PORT;
+   output    = sys.stdout;
+  
+   opts, domains = getopt(sys.argv[1:], 'f:d:p:o:h', ['file=', 'dns=', '--dport=', '--sport=', 'output=', 'help']);
+  
+   for k, v in opts:
+      if( '-f' == k or '--file' == k ):
+         fileName = v;
+      elif( '-d' == k or '--dns' == k ):
+         dnsServer = v;
+      elif( '-p' == k or '--dport' == k ):
+         dnsPort = int(v);
+      elif( '-o' == k or '--output' == k ):
+         if( os.path.exists(v) ):
+            print '%s: file exists. Please use a different file name.' % (v)
+         output = open(v, 'w');
+      elif( '--srcport' == k ):
+         srcPort = int(v);
+      elif( '-h' == k or '--help' == k ):
+         doHelp();
+  
+   fptr = open(fileName, 'r');
+   lines = fptr.readlines();
+   fptr.close();
+  
+   for domain in domains:
+      for subdomain in lines:
+         subdomain = subdomain.rstrip();
+         _domain = '%s.%s' % (subdomain, domain);
+         rslt = dnsReq(_domain);
+         if( rslt ):
+            output.write('%s: %s\n' % (_domain, ', '.join(rslt)));
+

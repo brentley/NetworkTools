@@ -33,19 +33,97 @@ from struct import unpack
 from getopt import getopt
 from getopt import GetoptError
 
-#class CDPFieldLenField(FieldLenField):
-#   def m2i(self, pkt, s):
-#      return int(hexlify(s), 16);
-#
-#   def getfield(self, pkt, s):
-#      l = 4
-#      if( pkt.content ):
-#         l += len(pkt.content);
-#      return s[4:], self.m2i(s[2:4]);
+# One address
+class CDPPacketAddressField(Packet):
+   
 
-#class CDPStrLenField(StrLenField):
-#   def getfield(self, pkt, s):
-#      return s[pkt.len:], pkt.content;
+# Container for addresses
+class CDPPacketAddressListField(PacketListField):
+    def m2i(self, pkt, m):
+       return CDPTLV(m);
+
+    def getfield(self, pkt, s):
+        lst = []
+        ret = ""
+        remain = s
+        while remain:
+            if(len(remain) >= 0x4) :
+                l = int(hexlify(remain[2:4]), 16);
+                remain,ret = remain[:l],remain[l:]
+            else:
+                remain, ret = None, remain
+            try:
+                p = self.m2i(pkt,remain)
+            except Exception:
+                if conf.debug_dissector:
+                    raise
+                p = conf.raw_layer(load=remain)
+                remain = ""
+            lst.append(p)
+            remain = ret
+        return remain+ret,lst
+ 
+class CDPPacketAddressListField(PacketListField):
+    def getfield(self, pkt, s):
+        lst = []
+        ret = ""
+        remain = s
+        while remain:
+            if(len(remain) >= 0x4) :
+                l = int(hexlify(remain[2:4]), 16);
+                remain,ret = remain[:l],remain[l:]
+            else:
+                remain, ret = None, remain
+            try:
+                p = self.m2i(pkt,remain)
+            except Exception:
+                if conf.debug_dissector:
+                    raise
+                p = conf.raw_layer(load=remain)
+                remain = ""
+            lst.append(p)
+            remain = ret
+        return remain+ret,lst
+
+class CDPAddressListTLV(Packet):
+   fields_desc = [ShortEnumField('type', 0x00001,
+                                    {
+                                    }),
+                  IntField
+                  StrLenField('addresses', None, length_from=lambda pkt : pkt.len);
+   IntField('addrCount'
+                 XShortField('version', 2),
+                 ByteField('ttl',180),
+                 XShortField('chksum', None),
+                 CDPPacketListField('infos', [], None)];
+   pass
+
+class CDPIntTLV(Packet):
+   fields_desc = [ShortEnumField('type', 0x00001,
+                                 {  3: 'DeviceID',
+                                   10: 'NativeVLAN'
+                                 }),
+                  IntField('len', 4),
+                  IntField('content', None)];
+ 
+
+      for tlv in p[CDP].infos:
+         if tlv.type == 10:
+            print 'VLAN %d' % (unpack('!H', tlv.content)[0]);
+         elif tlv.type == 3:
+            print 'Port: %s' % tlv.content
+         elif tlv.type == 1:
+            print 'DeviceID: %s' % tlv.content
+         elif tlv.type == 0x16:
+            addrCount = unpack('!I', tlv.content[0:4])[0]
+            raw = tlv.content[4:]
+            for i in range(addrCount):
+               addrLen = unpack('!H', raw[3:5])[0]
+               addr = []
+               for addrByteIdx in range(addrLen):
+                  addr.append(unpack('!B', raw[5+addrByteIdx:5+addrByteIdx+1])[0])
+               print 'Management Address: %s' % ('.'.join([str(x) for x in addr]))
+               raw = raw[5+addrLen:]
 
 class CDPTLV(Packet):
    fields_desc = [ShortEnumField('type', 0x00001,  # according to http://www.cisco.com/univercd/cc/td/doc/product/lan/trsrb/frames.htm#xtocid12
